@@ -1,241 +1,193 @@
-```python
-readme_content = """# Ecommerce Web Analytics Log Pipeline (68M Records)
+# Log Tracking Analytics Pipeline
 
-A Big Data Engineering & Business Intelligence project designed to process, normalize, and analyze a massive clickstream dataset of **67,501,979 rows** (~68 million user behavior logs) using **PySpark** and **PostgreSQL**.
+This project is a local PySpark data pipeline for processing ecommerce clickstream logs. It uses a medallion-style layout:
 
-## 📌 Project Overview
-This project demonstrates an end-to-end Big Data pipeline implementing the **Medallion Architecture** (Bronze → Silver → Gold). It ingests raw, heavily denormalized web log data, standardizes schemas, enforces Third Normal Form (3NF) normalization, resolves time-varying product price fluctuations, and aggregates strategic business metrics for downstream Business Intelligence (BI) dashboards.
+- **Bronze**: raw CSV logs converted to typed Parquet.
+- **Silver**: normalized dimension-like and event tables.
+- **Gold**: business-ready analytical datasets for reporting.
+- **PostgreSQL export**: optional JDBC load for selected gold datasets.
 
----
+The source dataset contains ecommerce user activity such as product views, cart actions, and purchases.
 
-## 📂 Project Structure
+## Data Source
 
+The raw data files used by this project are available from this Google Drive folder:
 
-```
+[Log Tracking Dataset](https://drive.google.com/drive/folders/1nSTzQD2ezMOTgsy5fF9eqpjaDmdwyLPa)
+
+## Repository Structure
 
 ```text
-README.md written successfully.
-
-```text
-ecommerce_analytics_project/
-│
-├── data/                           # Data storage (Excluded from Git tracking)
-│   ├── raw_data/                   # Raw clickstream log files (~68M rows)
-│   ├── bronze/                     # Raw data ingested into schema-enforced Parquet format
-│   ├── silver/                     # 3NF Normalized data tables (Events, Products, etc.)
-│   └── gold/                       # Analytical data marts (RFM, Cohort, Sales Trends)
-│
-├── src/                            # Core pipeline source code
-│   ├── __init__.py
-│   ├── connection/                 # Database connectivity layer
-│   │   ├── __init__.py
-│   │   └── postgres_jdbc.py        # Spark-PostgreSQL JDBC connection configs
-│   │
-│   ├── utils/                      # Shared utility modules
-│   │   ├── __init__.py
-│   │   └── spark_helpers.py        # Optimized SparkSession initializer (RAM/Cores config)
-│   │
-│   ├── pipeline/                   # ETL pipeline processing stages
-│   │   ├── __init__.py
-│   │   ├── step1_bronze.py         # Raw ingestion & Type casting -> Bronze Parquet
-│   │   ├── step2_silver.py         # 3NF Normalization & Price fluctuation management
-│   │   └── step3_gold.py           # BI metric aggregation (RFM, Cohort, Trends)
-│   │
-│   └── export/                     # Database loading orchestration
-│       ├── __init__.py
-│       └── load_to_postgres.py     # Writes Gold/Silver Parquet data into PostgreSQL via JDBC
-│
-├── notebooks/                      # R&D and Exploratory Data Analysis (EDA)
-│   ├── 01_eda_raw_data.ipynb       # Assessing null values, data distribution, and data types
-│   ├── 02_test_normalization.ipynb # Prototyping 3NF splitting & Window functions for pricing
-│   └── 03_test_bi_queries.ipynb    # Validating analytical logic (RFM, Cohort) on samples
-│
-├── config/                         # Centralized configuration parameters
-│   └── db_config.json              # PostgreSQL credentials, host, port, and driver options
-│
-├── jars/                           # Database driver binaries
-│   └── postgresql-42.x.x.jar       # PostgreSQL JDBC Driver jar file
-│
-├── .gitignore                      # Prevents committing heavy data directories to VCS
-├── requirements.txt                # Python project dependencies
-└── README.md                       # Project documentation and setup guide
-
+log_tracking/
++-- data/
+|   +-- raw_data/
+|   |   +-- 01-log-tracking.csv
+|   |   +-- 02-purchase-behavior.csv
+|   +-- bronze/
+|   +-- silver/
+|   |   +-- users/
+|   |   +-- categories/
+|   |   +-- products/
+|   |   +-- events/
+|   +-- gold/
+|       +-- sales_trend/
+|       +-- brand_analysis/
+|       +-- rfm_segmented/
++-- jars/
+|   +-- postgresql-42.7.3.jar
++-- notebook/
+|   +-- 01_eda_raw_data.ipynb
+|   +-- 02_normalize.ipynb
+|   +-- 03_exploratory.ipynb
++-- pipeline/
+|   +-- step1_bronze.py
+|   +-- step2_silver.py
+|   +-- step3_gold.py
+|   +-- load_to_postgres.py
++-- requirements.txt
++-- README.md
 ```
 
----
+## Tech Stack
 
-## 🛠️ Tech Stack & Architecture
+- Python
+- PySpark
+- Pandas, NumPy
+- Seaborn for notebook analysis
+- Apache Parquet for local storage
+- PostgreSQL through JDBC for optional database loading
 
-* **Data Processing:** PySpark (Spark SQL & DataFrame API) for distributed parallel computing.
-* **Storage Layer:** Local File System structured in highly optimized **Apache Parquet** columnar format.
-* **Target Database:** **PostgreSQL** relational database for operational querying and downstream reporting.
-* **BI & Visualizations:** Matplotlib/Seaborn (Python-native reporting) or direct connection via Power BI/Tableau to PostgreSQL.
+## Data Flow
 
----
+### 1. Bronze Layer
 
-## 🗄️ Data Modeling & Normalization (Silver Layer)
+`pipeline/step1_bronze.py` reads:
 
-The raw clickstream dataset is completely flat and contains severe data redundancies. The pipeline normalizes the schema into **Third Normal Form (3NF)**:
+```text
+data/raw_data/01-log-tracking.csv
+```
 
-### Raw Schema:
+It casts the raw fields into analytical types and writes Parquet output to:
 
-`[event_time, event_type, product_id, category_id, category_code, brand, price, user_id, user_session]`
+```text
+data/bronze/
+```
 
-### Target 3NF Relational Model:
+Expected raw columns:
 
-1. **`users` Table:** `user_id` (PK)
-2. **`categories` Table:** `category_id` (PK), `category_code`, `sub_category`, `product_type` (parsed paths)
-3. **`products` Table:** `product_id` (PK), `brand`, `category_id` (FK)
-4. **`events` Table:** `event_id` (Generated PK), `event_time`, `event_type`, `product_id` (FK), `user_id` (FK), `user_session`, `captured_price`
+```text
+event_time, event_type, product_id, category_id, category_code, brand, price, user_id, user_session
+```
 
-> ⚠️ **Price Fluctuation Handling:** Product prices change dynamically over time. To handle this without violating 3NF, the structural characteristics of the product (`brand`, `category_id`) are decoupled into the `products` table, while the historical snapshot price at the exact moment of transaction/interaction is maintained natively within the transactional `events` table (or tracked using an SCD Type 2 pattern if historical base price mapping is needed).
+### 2. Silver Layer
 
----
+`pipeline/step2_silver.py` reads the bronze Parquet dataset and creates normalized Parquet tables:
 
-## 📊 Gold Layer: Strategic Business Intelligence Workloads
+- `data/silver/users/`: unique `user_id` values.
+- `data/silver/categories/`: category metadata parsed from `category_code`.
+- `data/silver/products/`: product metadata with `product_id`, `brand`, and `category_id`.
+- `data/silver/events/`: event facts with timestamp, event type, product, user, session, and captured price.
 
-Once normalized, PySpark processes the Silver layer to compute four production-grade analytical models:
+The price field is stored in the event table as `captured_price` because product prices can change over time. This preserves the price observed at the moment of each user interaction.
 
-### 1. Sales & Interaction Trend Analysis
+### 3. Gold Layer
 
-* Evaluates correlation between user interaction spikes (`view`, `cart`) and actual conversions (`purchase`).
-* Tracks lead time bottlenecks (e.g., assessing if consumers window-shop 2-3 days prior to peak purchasing windows).
+`pipeline/step3_gold.py` builds analytical datasets from the silver layer:
 
-### 2. Weekly Cohort Retention Matrix
+- `sales_trend`: daily views, cart events, purchases, and purchase revenue.
+- `brand_analysis`: purchase volume and revenue by brand.
+- `rfm_segmented`: user-level recency, frequency, monetary value, and customer segment.
 
-* Isolates distinct user cohorts based on their first initial purchase week.
-* Calculates weekly engagement and transaction decay (`Weeks After`) to compute precise user lifetime values and friction boundaries.
+### 4. PostgreSQL Export
 
-### 3. Market Preference & Brand Share
+`pipeline/load_to_postgres.py` loads selected gold datasets into PostgreSQL tables:
 
-* Aggregates metrics comparing market leaders (e.g., tracking why certain brands dominate Gross Merchandise Value (GMV) while competitors dominate total volume/order density).
+- `sales_trend`
+- `brand_analysis`
+- `rfm_segmented`
 
-### 4. RFM Segmentation Model
+The script downloads the PostgreSQL JDBC driver automatically if `jars/postgresql-42.7.3.jar` is missing.
 
-* Dynamically assigns scores across three key components:
-* **Recency (R):** Days elapsed since the customer's last purchase.
-* **Frequency (F):** Total volume of completed purchase transactions.
-* **Monetary (M):** Cumulative lifetime capital spend.
+## Setup
 
+### Prerequisites
 
-* Segments users into actionable categories: *Champions (VIP)*, *Loyal Customers*, *At Risk*, and *Lost*.
+Install the following locally:
 
----
+- Python 3.8+
+- Java JDK compatible with your PySpark version
+- PostgreSQL, only if you want to run the database export step
 
-## 🚀 Installation & Getting Started
+### Python Environment
 
-### 1. Prerequisites
+PowerShell:
 
-Ensure you have the following frameworks installed locally:
-
-* Java Runtime Environment (JRE) / JDK 8 or 11
-* Apache Spark 3.x.x
-* Python 3.8+
-* PostgreSQL Server Instance
-
-### 2. Set Up the Directory and Environment
-
-```bash
-# Clone or initialize the repository layout
-mkdir -p ecommerce_analytics_project/{data/{raw_data,bronze,silver,gold},src/{connection,utils,pipeline,export},notebooks,config,jars}
-
-# Set up virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# Install required python packages
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
 ```
 
-### 3. Fetch the PostgreSQL JDBC Driver
-
-1. Download the latest official JDBC driver from [PostgreSQL JDBC Driver Download](https://jdbc.postgresql.org/).
-2. Place the downloaded `.jar` file inside the `jars/` directory.
-
-### 4. Database Setup & Configuration
-
-Update the file `config/db_config.json` with your explicit credentials:
-
-```json
-{
-  "jdbc_url": "jdbc:postgresql://localhost:5432/ecommerce_db",
-  "properties": {
-    "user": "postgres",
-    "password": "your_secure_password",
-    "driver": "org.postgresql.Driver",
-    "batchsize": "100000",
-    "stringtype": "unspecified"
-  }
-}
-
-```
-
----
-
-## 🏃 Execution Workflow
-
-Execute the end-to-end data processing pipeline sequentially:
+macOS/Linux:
 
 ```bash
-# Step 1: Ingest raw log data and convert to schema-validated Bronze Parquet format
-python3 src/pipeline/step1_bronze.py
-
-# Step 2: Run 3NF Normalization and handle price fluctuations (Silver Layer)
-python3 src/pipeline/step2_silver.py
-
-# Step 3: Compute aggregate analytical BI models (Gold Layer)
-python3 src/pipeline/step3_gold.py
-
-# Step 4: Load final analytical insights into your local PostgreSQL database
-python3 src/export/load_to_postgres.py
-
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
----
+## Running the Pipeline
 
-## 🔒 Git Security Policy
+Run the steps from the repository root.
 
-The project utilizes strict `.gitignore` patterns to prevent multi-gigabyte files or sensitive administrative database configurations from leaking into production tracking repositories. Ensure your `.gitignore` contains:
+```powershell
+python pipeline\step1_bronze.py
+python pipeline\step2_silver.py
+python pipeline\step3_gold.py
+```
+
+To load the gold datasets into PostgreSQL:
+
+```powershell
+python pipeline\load_to_postgres.py
+```
+
+Before running the PostgreSQL load, update the connection settings in `pipeline/load_to_postgres.py`:
+
+```python
+jdbc_url = "jdbc:postgresql://localhost:5432/log_tracking_db"
+
+db_properties = {
+    "user": "postgres",
+    "password": "your_password",
+    "driver": "org.postgresql.Driver",
+    "batchsize": "50000"
+}
+```
+
+## Notebooks
+
+The `notebook/` directory contains exploratory work used to understand and validate the pipeline logic:
+
+- `01_eda_raw_data.ipynb`: raw log exploration.
+- `02_normalize.ipynb`: normalization experiments.
+- `03_exploratory.ipynb`: analytical exploration for gold-level outputs.
+
+## Generated Data
+
+The repository stores generated Parquet outputs under `data/`. These files can be regenerated by running the pipeline steps in order. The current `.gitignore` excludes:
 
 ```text
+.venv
 data/
-config/db_config.json
-venv/
-.ipynb_checkpoints/
-*.jar
-
+jars/
 ```
 
-"""
+This keeps large local data files, virtual environments, and downloaded JDBC jars out of version control.
 
-with open("README.md", "w", encoding="utf-8") as f:
-f.write(readme_content)
+## Notes
 
-print("README.md written successfully.")
-
-```
-Tôi đã thiết kế và khởi tạo file tài liệu **`README.md`** chuẩn hóa cho dự án Data Engineering của bạn. Vì bạn quyết định chuyển sang sử dụng hệ quản trị cơ sở dữ liệu **PostgreSQL**, toàn bộ cấu trúc kết nối, file Driver (`.jar`), mô tả JDBC pipeline, và hướng dẫn cấu hình hệ thống trong tài liệu đều đã được đồng bộ hóa hoàn toàn theo cấu trúc của PostgreSQL.
-
-Dưới đây là file tài liệu chi tiết cấu trúc thư mục, mô hình chuẩn hóa dữ liệu 3NF, logic xử lý biến động giá và các bài toán BI (RFM, Cohort, Trend) được viết theo quy chuẩn phân tích Big Data.
-
-[file-tag: code-generated-file-0-1780237537974018041]
-
----
-
-### 💡 Các điểm lưu ý quan trọng khi triển khai với PostgreSQL cho 68 triệu dòng log:
-
-1. **Cấu hình JDBC Batch Size:**
-   Trong file cấu hình mẫu `config/db_config.json` ở file README, tham số `"batchsize": "100000"` được thêm vào nhằm ép PySpark gom cụm dữ liệu (gồm nhiều dòng) trước khi thực hiện lệnh `INSERT` hàng loạt vào PostgreSQL. Nếu không cấu hình tham số này, Spark sẽ ghi từng dòng tuần tự hoặc chia block quá nhỏ, dễ gây nghẽn kết nối mạng (Network I/O bottleneck) và làm tràn bộ nhớ đệm của DB.
-
-2. **Bài toán xử lý biến động giá (Price Fluctuation) trong 3NF:**
-   Do giá của cùng một `product_id` có thể thay đổi theo từng khung giờ hoặc chiến dịch marketing, nếu bạn đưa cột `price` vào bảng `products` thì sẽ vi phạm dạng chuẩn 3 (vì cùng một sản phẩm sẽ sinh ra nhiều dòng trùng ID nhưng khác giá, làm mất tính duy nhất của Khóa chính - Primary Key). 
-   * **Giải pháp tối ưu:** Tách thông tin cố định của sản phẩm (`brand`, `category_id`) ra bảng `products`. Giữ nguyên mức giá tại thời điểm xảy ra tương tác (`captured_price`) trực tiếp ở bảng transactional là bảng `events`.
-
-3. **Cấu hình Tối ưu phần cứng cho PostgreSQL:**
-   68 triệu dòng log khi nạp vào SQL sẽ chiếm dung lượng lưu trữ tương đối lớn và tạo áp lực lên RAM khi thực hiện các phép toán `JOIN` hoặc `INDEX`. Bạn nên cài đặt hoặc điều chỉnh các tham số cấu hình trong file `postgresql.conf` của PostgreSQL để tối ưu hiệu năng ghi:
-   * Tăng `max_wal_size` và `checkpoint_completion_target` để tránh việc PostgreSQL phải ghi dữ liệu xuống đĩa cứng (Flush disk) quá liên tục trong quá trình PySpark đẩy data thông qua JDBC driver.
-
-Bạn có thể mở file `README.md` vừa được tạo trong thư mục dự án của mình để bắt đầu viết mã nguồn cho các file ETL theo đúng sơ đồ trên. Nếu bạn cần hỗ trợ viết tiếp mã nguồn PySpark cho **Step 1 (Ingest Raw -> Bronze Parquet)** hoặc **Step 2 (Phân rã dữ liệu chuẩn hóa 3NF)**, hãy cứ nói cho mình biết nhé!
-
-```
+- Spark is configured to run locally with `local[*]`.
+- The pipeline scripts currently configure Spark memory directly in code.
+- PostgreSQL credentials are currently defined directly in `pipeline/load_to_postgres.py`; use environment variables or a local config file before sharing this project.
+- If the gold export script cannot find a gold subdirectory, rerun the gold step or adjust `pipeline/step3_gold.py` so each dataframe is written to its matching folder under `data/gold/`.
